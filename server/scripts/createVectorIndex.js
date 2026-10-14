@@ -2,12 +2,23 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const { EMBEDDING_DIMENSIONS, VECTOR_INDEX_NAME } = require("../config");
 
+// Index names from earlier versions (the local-embeddings one had 384 dimensions)
+const OLD_INDEX_NAMES = ["chunk_vector_index"];
+
 async function main() {
   await mongoose.connect(process.env.MONGO_URI);
   const collection = mongoose.connection.collection("chunks");
 
-  const existing = await collection.listSearchIndexes().toArray();
-  if (!existing.some((i) => i.name === VECTOR_INDEX_NAME)) {
+  let indexes = await collection.listSearchIndexes().toArray();
+
+  for (const name of OLD_INDEX_NAMES) {
+    if (indexes.some((i) => i.name === name)) {
+      await collection.dropSearchIndex(name);
+      console.log(`Dropped old index: ${name}`);
+    }
+  }
+
+  if (!indexes.some((i) => i.name === VECTOR_INDEX_NAME)) {
     await collection.createSearchIndex({
       name: VECTOR_INDEX_NAME,
       type: "vectorSearch",
@@ -28,7 +39,7 @@ async function main() {
     console.log("Index already exists.");
   }
 
-  const indexes = await collection.listSearchIndexes().toArray();
+  indexes = await collection.listSearchIndexes().toArray();
   for (const i of indexes) {
     console.log(`${i.name}: status=${i.status}, queryable=${i.queryable}`);
   }

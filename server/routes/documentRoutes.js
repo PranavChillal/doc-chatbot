@@ -6,6 +6,7 @@ const Chunk = require("../models/Chunk");
 const extractPdfText = require("../utils/extractPdfText");
 const chunkText = require("../utils/chunkText");
 const { embedTexts } = require("../utils/embeddings");
+const { LlmError } = require("../utils/gemini");
 
 const router = express.Router();
 
@@ -85,7 +86,7 @@ router.post("/", (req, res) => {
         });
       }
 
-      // Turn every chunk into a vector of numbers (this is the slow part)
+      // Turn every chunk into a vector of numbers (calls Google's embedding API)
       const vectors = await embedTexts(chunks.map((c) => c.text));
 
       const doc = await PdfDocument.create({
@@ -114,6 +115,20 @@ router.post("/", (req, res) => {
         chunkCount: doc.chunkCount,
       });
     } catch (e) {
+      if (e instanceof LlmError) {
+        console.error(`AI error while embedding (${e.kind}):`, e.message);
+        if (e.kind === "rate_limit") {
+          return res.status(429).json({
+            error: "The AI service is busy or the free quota is used up. Try again in a minute.",
+          });
+        }
+        if (e.kind === "config" || e.kind === "auth" || e.kind === "model") {
+          return res
+            .status(500)
+            .json({ error: "The AI service isn't set up correctly. Check the server log." });
+        }
+        return res.status(502).json({ error: "The AI service failed. Please try again." });
+      }
       console.error("Processing failed:", e);
       return res
         .status(500)

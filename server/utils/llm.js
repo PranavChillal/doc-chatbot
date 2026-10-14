@@ -1,33 +1,9 @@
-const { GoogleGenAI, ApiError } = require("@google/genai");
+const { getClient, LlmError, toLlmError, sleep } = require("./gemini");
 
-// All the AI-provider details live in this one file.
-// To switch providers later, only this file changes.
+// Writes answers. Only this file and gemini.js know which AI provider is used.
 
-class LlmError extends Error {
-  constructor(message, kind) {
-    super(message);
-    this.name = "LlmError";
-    // "config" | "rate_limit" | "auth" | "model" | "empty" | "timeout" | "unavailable"
-    this.kind = kind;
-  }
-}
-
-const REQUEST_TIMEOUT_MS = 20000; // give up on one request after 20 seconds
 const ATTEMPTS_PER_MODEL = 2; // try each model twice before moving on
 const RETRY_DELAY_MS = 1000;
-
-let client = null;
-function getClient() {
-  if (!client) {
-    client = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: { timeout: REQUEST_TIMEOUT_MS },
-    });
-  }
-  return client;
-}
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // The main model first, then any backups listed in GEMINI_FALLBACK_MODELS
 function modelsToTry() {
@@ -37,26 +13,6 @@ function modelsToTry() {
     .map((m) => m.trim())
     .filter(Boolean);
   return [primary, ...fallbacks.filter((m) => m !== primary)];
-}
-
-// Turns any error from the AI library into one of our own error kinds
-function toLlmError(err) {
-  if (err instanceof LlmError) return err;
-  if (err instanceof ApiError) {
-    if (err.status === 429) return new LlmError(err.message, "rate_limit");
-    if (err.status === 401 || err.status === 403) return new LlmError(err.message, "auth");
-    if (err.status === 404) return new LlmError(err.message, "model");
-    if (err.status === 400 && /api key/i.test(err.message)) {
-      return new LlmError(err.message, "auth");
-    }
-  }
-  const message = (err && err.message) || "AI request failed";
-  const timedOut =
-    err?.name === "AbortError" ||
-    err?.name === "TimeoutError" ||
-    /timed? ?out|timeout|aborted/i.test(message);
-  if (timedOut) return new LlmError("The AI request timed out.", "timeout");
-  return new LlmError(message, "unavailable");
 }
 
 // Ask one specific model, retrying briefly if it's just busy
