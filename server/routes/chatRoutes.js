@@ -4,6 +4,7 @@ const PdfDocument = require("../models/PdfDocument");
 const Conversation = require("../models/Conversation");
 const { searchChunks } = require("../utils/retrieval");
 const { generateAnswer, LlmError } = require("../utils/llm");
+const { getOwnerId } = require("../utils/security");
 const { MIN_SCORE, TOP_K } = require("../config");
 
 const router = express.Router();
@@ -82,14 +83,19 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "Invalid conversation id." });
   }
 
+  const ownerId = getOwnerId(req);
+  if (!ownerId) {
+    return res.status(400).json({ error: "Invalid client id." });
+  }
+
   try {
     const q = question.trim();
 
-    // Load the conversation (if any) and its recent messages
+    // Load the conversation (only if it belongs to this visitor) and its recent messages
     let conversation = null;
     let history = [];
     if (conversationId) {
-      conversation = await Conversation.findById(conversationId);
+      conversation = await Conversation.findOne({ _id: conversationId, ownerId });
       if (!conversation) {
         return res.status(404).json({ error: "Conversation not found." });
       }

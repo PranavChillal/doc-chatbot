@@ -2,8 +2,21 @@ const express = require("express");
 const mongoose = require("mongoose");
 const Conversation = require("../models/Conversation");
 const PdfDocument = require("../models/PdfDocument");
+const { getOwnerId } = require("../utils/security");
 
 const router = express.Router();
+
+const MAX_CONVERSATIONS_PER_OWNER = 30;
+
+// Every route below only touches the visitor's own chats
+router.use((req, res, next) => {
+  const ownerId = getOwnerId(req);
+  if (!ownerId) {
+    return res.status(400).json({ error: "Invalid client id." });
+  }
+  req.ownerId = ownerId;
+  next();
+});
 
 // POST /api/conversations  { "documentId": "..." (optional) }
 router.post("/", async (req, res) => {
@@ -18,7 +31,18 @@ router.post("/", async (req, res) => {
         return res.status(404).json({ error: "Document not found." });
       }
     }
-    const convo = await Conversation.create({ documentId: documentId || undefined });
+
+    const count = await Conversation.countDocuments({ ownerId: req.ownerId });
+    if (count >= MAX_CONVERSATIONS_PER_OWNER) {
+      return res
+        .status(400)
+        .json({ error: "You have too many chats. Please delete some first." });
+    }
+
+    const convo = await Conversation.create({
+      ownerId: req.ownerId,
+      documentId: documentId || undefined,
+    });
     res.status(201).json({
       id: convo._id,
       title: convo.title,
@@ -30,13 +54,13 @@ router.post("/", async (req, res) => {
   }
 });
 
-// GET /api/conversations  ->  list chats, most recent first
+// GET /api/conversations  ->  list this visitor's chats, most recent first
 router.get("/", async (req, res) => {
   try {
-    const convos = await Conversation.find()
+    const convos = await Conversation.find({ ownerId: req.ownerId })
       .select("-messages")
       .sort({ updatedAt: -1 })
-      .limit(50);
+      .limit(MAX_CONVERSATIONS_PER_OWNER);
     res.json(
       convos.map((c) => ({
         id: c._id,
@@ -58,7 +82,7 @@ router.get("/:id", async (req, res) => {
     return res.status(400).json({ error: "Invalid conversation id." });
   }
   try {
-    const convo = await Conversation.findById(id);
+    const convo = await Conversation.findOne({ _id: id, ownerId: req.ownerId });
     if (!convo) {
       return res.status(404).json({ error: "Conversation not found." });
     }
@@ -81,7 +105,7 @@ router.delete("/:id", async (req, res) => {
     return res.status(400).json({ error: "Invalid conversation id." });
   }
   try {
-    const convo = await Conversation.findByIdAndDelete(id);
+    const convo = await Conversation.findOneAndDelete({ _id: id, ownerId: req.ownerId });
     if (!convo) {
       return res.status(404).json({ error: "Conversation not found." });
     }

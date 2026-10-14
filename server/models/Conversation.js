@@ -25,6 +25,8 @@ const messageSchema = new mongoose.Schema(
 
 const conversationSchema = new mongoose.Schema(
   {
+    // Random id made by the visitor's browser, so people only see their own chats
+    ownerId: { type: String, required: true, index: true },
     title: { type: String, default: "New chat", trim: true, maxlength: 120 },
     // Optional: limit this chat to one document
     documentId: { type: mongoose.Schema.Types.ObjectId, ref: "PdfDocument", default: undefined },
